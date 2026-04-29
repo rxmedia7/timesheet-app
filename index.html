@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>PDF Editor</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <!-- React + ReactDOM + Babel -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- PDF.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+    <!-- pdf-lib -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+
+    <!-- html2canvas -->
+    <script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
+    <style>
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+        background: #f5f5f7;
+        color: #111827;
+      }
+      .app-root {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 16px;
+      }
+      .editor-card {
+        background: #ffffff;
+        border-radius: 18px;
+        box-shadow: 0 18px 40px rgba(0,0,0,0.08);
+        padding: 16px;
+        max-width: 960px;
+        width: 100%;
+      }
+      .app-title {
+        margin: 0 0 12px;
+        font-size: 20px;
+        font-weight: 600;
+        text-align: center;
+      }
+      .pdf-wrapper {
+        position: relative;
+        margin: 0 auto;
+        overflow: hidden;
+      }
+      .pdf-canvas {
+        width: 100%;
+        height: auto;
+        display: block;
+        border-radius: 12px;
+      }
+      .overlay-container {
+        position: absolute;
+        top: 0;
+        left: 0;
+      }
+      .overlay-input {
+        position: absolute;
+        font-size: 11px;
+        padding: 2px 4px;
+        border-radius: 4px;
+        border: 1px solid rgba(148,163,184,0.7);
+        background: rgba(255,255,255,0.9);
+        outline: none;
+      }
+      .overlay-input:focus {
+        border-color: #2563eb;
+        box-shadow: 0 0 0 1px rgba(37,99,235,0.3);
+      }
+      .btn-primary, .btn-secondary {
+        border-radius: 999px;
+        padding: 8px 16px;
+        border: none;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+      }
+      .btn-primary {
+        background: #111827;
+        color: #fff;
+      }
+      .btn-secondary {
+        background: #e5e7eb;
+        color: #111827;
+      }
+      .sign-btn {
+        position: absolute;
+        right: 12px;
+        bottom: 12px;
+      }
+      .export-row {
+        display: flex;
+        justify-content: center;
+        gap: 8px;
+        margin-top: 16px;
+        flex-wrap: wrap;
+      }
+      .modal-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(15,23,42,0.35);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 50;
+      }
+      .modal-card {
+        background: #fff;
+        border-radius: 16px;
+        padding: 16px;
+        width: 90%;
+        max-width: 480px;
+      }
+      .signature-canvas {
+        width: 100%;
+        border-radius: 12px;
+        border: 1px solid #cbd5f5;
+        background: #f9fafb;
+      }
+      .modal-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 12px;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+      const { useState, useEffect, useRef } = React;
+
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+      function PdfCanvas({ onSize }) {
+        const canvasRef = useRef(null);
+
+        useEffect(() => {
+          const loadPdf = async () => {
+            const pdf = await pdfjsLib.getDocument("./pro.pdf").promise;
+            const page = await pdf.getPage(1);
+
+            const containerWidth = Math.min(window.innerWidth - 32, 900);
+            const viewport = page.getViewport({ scale: 1 });
+            const scale = containerWidth / viewport.width;
+            const scaledViewport = page.getViewport({ scale });
+
+            const canvas = canvasRef.current;
+            const ctx = canvas.getContext("2d");
+            canvas.width = scaledViewport.width;
+            canvas.height = scaledViewport.height;
+
+            await page.render({ canvasContext: ctx, viewport: scaledViewport }).promise;
+
+            onSize({ width: canvas.width, height: canvas.height });
+          };
+
+          loadPdf();
+          window.addEventListener("resize", loadPdf);
+          return () => window.removeEventListener("resize", loadPdf);
+        }, []);
+
+        return <canvas ref={canvasRef} className="pdf-canvas" />;
+      }
+
+      const rows = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
+
+      function TableOverlay({ pdfSize, tableData, setTableData }) {
+        const { width, height } = pdfSize;
+
+        const tableTop = 0.32 * height;
+        const rowHeight = 0.055 * height;
+        const colLefts = {
+          date: 0.18 * width,
+          start: 0.32 * width,
+          lunch: 0.46 * width,
+          finish: 0.60 * width,
+          total: 0.74 * width,
+          comments: 0.82 * width,
+        };
+        const colWidths = {
+          date: 0.12 * width,
+          start: 0.12 * width,
+          lunch: 0.12 * width,
+          finish: 0.12 * width,
+          total: 0.08 * width,
+          comments: 0.16 * width,
+        };
+
+        const handleChange = (day, field, value) => {
+          setTableData(prev => ({
+            ...prev,
+            [day]: { ...prev[day], [field]: value }
+          }));
+        };
+
+        return (
+          <div className="overlay-container">
+            {rows.map((day, i) => {
+              const rowTop = tableTop + i * rowHeight;
+              const row = tableData[day];
+
+              return (
+                <div key={day}>
+                  {Object.keys(colLefts).map(field => (
+                    <input
+                      key={field}
+                      className="overlay-input"
+                      style={{
+                        top: rowTop,
+                        left: colLefts[field],
+                        width: colWidths[field],
+                      }}
+                      value={row[field]}
+                      onChange={e => handleChange(day, field, e.target.value)}
+                    />
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        );
+      }
+
+      function SignaturePad({ onClose, onSave }) {
+        const canvasRef = useRef(null);
+
+        const start = e => {
+          const c = canvasRef.current;
+          const ctx = c.getContext("2d");
+          ctx.strokeStyle = "#000";
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          const r = c.getBoundingClientRect();
+          ctx.moveTo(e.clientX - r.left, e.clientY - r.top);
+          c.isDrawing = true;
+        };
+
+        const draw = e => {
+          const c = canvasRef.current;
+          if (!c.isDrawing) return;
+          const ctx = c.getContext("2d");
+          const r = c.getBoundingClientRect();
+          ctx.lineTo(e.clientX - r.left, e.clientY - r.top);
+          ctx.stroke();
+        };
+
+        const stop = () => (canvasRef.current.isDrawing = false);
+
+        const clear = () => {
+          const c = canvasRef.current;
+          c.getContext("2d").clearRect(0, 0, c.width, c.height);
+        };
+
+        const save = () => {
+          const data = canvasRef.current.toDataURL("image/png");
+          onSave(data);
+          onClose();
+        };
+
+        return (
+          <div className="modal-backdrop">
+            <div className="modal-card">
+              <h2>Sign</h2>
+              <canvas
+                ref={canvasRef}
+                width={400}
+                height={150}
+                className="signature-canvas"
+                onMouseDown={start}
+                onMouseMove={draw}
+                onMouseUp={stop}
+                onMouseLeave={stop}
+              />
+              <div className="modal-actions">
+                <button className="btn-secondary" onClick={clear}>Clear</button>
+                <button className="btn-secondary" onClick={onClose}>Cancel</button>
+                <button className="btn-primary" onClick={save}>Save</button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      function SignatureButton({ pdfSize, signature, setSignature }) {
+        const [open, setOpen] = useState(false);
+        const { width, height } = pdfSize;
+
+        if (!width) return null;
+
+        const sigW = 0.25 * width;
+        const sigH = 0.08 * height;
+        const sigL = width - sigW - 0.05 * width;
+        const sigT = height - sigH - 0.08 * height;
+
+        return (
+          <>
+            <button className="btn-primary sign-btn" onClick={() => setOpen(true)}>
+              Sign
+            </button>
+
+            {signature && (
+              <img
+                src={signature}
+                style={{
+                  position: "absolute",
+                  left: sigL,
+                  top: sigT,
+                  width: sigW,
+                  height: sigH,
+                  objectFit: "contain",
+                  pointerEvents: "none",
+                }}
+              />
+            )}
+
+            {open && (
+              <SignaturePad
+                onClose={() => setOpen(false)}
+                onSave={setSignature}
+              />
+            )}
+          </>
+        );
+      }
+
+      async function exportPdf() {
+        const wrapper = document.getElementById("pdf-wrapper");
+        const canvas = await html2canvas(wrapper, { scale: 2 });
+        const img = canvas.toDataURL("image/png");
+
+        const pdfBytes = await fetch("pro.pdf").then(r => r.arrayBuffer());
+        const pdfDoc = await PDFLib.PDFDocument.load(pdfBytes);
+        const page = pdfDoc.getPage(0);
+        const png = await pdfDoc.embedPng(img);
+        const { width, height } = page.getSize();
+
+        page.drawImage(png, { x: 0, y: 0, width, height });
+
+        const final = await pdfDoc.save();
+        const blob = new Blob([final], { type: "application/pdf" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = "timesheet-edited.pdf";
+        link.click();
+      }
+
+      async function exportJpeg() {
+        const wrapper = document.getElementById("pdf-wrapper");
+        const canvas = await html2canvas(wrapper, { scale: 2 });
+        const data = canvas.toDataURL("image/jpeg", 0.95);
+
+        const link = document.createElement("a");
+        link.href = data;
+        link.download = "timesheet-edited.jpg";
+        link.click();
+      }
+
+      function ExportButtons({ pdfSize }) {
+        return (
+          <div className="export-row">
+            <button className="btn-secondary" onClick={exportPdf} disabled={!pdfSize.width}>
+              Download PDF
+            </button>
+            <button className="btn-secondary" onClick={exportJpeg} disabled={!pdfSize.width}>
+              Download JPEG
+            </button>
+          </div>
+        );
+      }
+
+      function App() {
+        const [pdfSize, setPdfSize] = useState({ width: 0, height: 0 });
+        const [signature, setSignature] = useState(null);
+
+        // CLEAN EMPTY TABLE
+        const emptyRow = { date:"", start:"", lunch:"", finish:"", total:"", comments:"" };
+
+        const [tableData, setTableData] = useState({
+          monday: { ...emptyRow },
+          tuesday: { ...emptyRow },
+          wednesday: { ...emptyRow },
+          thursday: { ...emptyRow },
+          friday: { ...emptyRow },
+          saturday: { ...emptyRow },
+          sunday: { ...emptyRow },
+        });
+
+        return (
+          <div className="app-root">
+            <div className="editor-card">
+              <h1 className="app-title">Timesheet Editor</h1>
+
+              <div className="pdf-wrapper" id="pdf-wrapper">
+                <PdfCanvas onSize={setPdfSize} />
+                {pdfSize.width > 0 && (
+                  <TableOverlay
+                    pdfSize={pdfSize}
+                    tableData={tableData}
+                    setTableData={setTableData}
+                  />
+                )}
+                <SignatureButton
+                  pdfSize={pdfSize}
+                  signature={signature}
+                  setSignature={setSignature}
+                />
+              </div>
+
+              <ExportButtons pdfSize={pdfSize} />
+            </div>
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
+</html>
