@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <title>PDF Editor</title>
+    <title>Timesheet PDF Editor</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
 
     <!-- React + ReactDOM + Babel -->
@@ -150,7 +150,7 @@
 
         useEffect(() => {
           const loadPdf = async () => {
-            const pdf = await pdfjsLib.getDocument("./pro.pdf").promise;
+            const pdf = await pdfjsLib.getDocument("pro.pdf").promise;
             const page = await pdf.getPage(1);
 
             const containerWidth = Math.min(window.innerWidth - 32, 900);
@@ -178,8 +178,59 @@
 
       const rows = ["monday","tuesday","wednesday","thursday","friday","saturday","sunday"];
 
+      function TopLeftOverlay({ pdfSize, headerData, setHeaderData }) {
+        const { width, height } = pdfSize;
+        if (!width) return null;
+
+        // Adjust these positions to match your PDF layout
+        const fields = {
+          employeeName: { top: 0.10 * height, left: 0.12 * width, width: 0.30 * width },
+          position:     { top: 0.15 * height, left: 0.12 * width, width: 0.30 * width },
+          projectName:  { top: 0.20 * height, left: 0.12 * width, width: 0.30 * width },
+          weekStarting: { top: 0.25 * height, left: 0.12 * width, width: 0.20 * width },
+        };
+
+        const handleChange = (field, value) => {
+          setHeaderData(prev => ({ ...prev, [field]: value }));
+        };
+
+        return (
+          <div className="overlay-container">
+            <input
+              className="overlay-input"
+              style={fields.employeeName}
+              placeholder="Employee name"
+              value={headerData.employeeName}
+              onChange={e => handleChange("employeeName", e.target.value)}
+            />
+            <input
+              className="overlay-input"
+              style={fields.position}
+              placeholder="Position (e.g. Labourer)"
+              value={headerData.position}
+              onChange={e => handleChange("position", e.target.value)}
+            />
+            <input
+              className="overlay-input"
+              style={fields.projectName}
+              placeholder="Project name"
+              value={headerData.projectName}
+              onChange={e => handleChange("projectName", e.target.value)}
+            />
+            <input
+              className="overlay-input"
+              style={fields.weekStarting}
+              type="date"
+              value={headerData.weekStarting}
+              onChange={e => handleChange("weekStarting", e.target.value)}
+            />
+          </div>
+        );
+      }
+
       function TableOverlay({ pdfSize, tableData, setTableData }) {
         const { width, height } = pdfSize;
+        if (!width) return null;
 
         const tableTop = 0.32 * height;
         const rowHeight = 0.055 * height;
@@ -215,19 +266,80 @@
 
               return (
                 <div key={day}>
-                  {Object.keys(colLefts).map(field => (
-                    <input
-                      key={field}
-                      className="overlay-input"
-                      style={{
-                        top: rowTop,
-                        left: colLefts[field],
-                        width: colWidths[field],
-                      }}
-                      value={row[field]}
-                      onChange={e => handleChange(day, field, e.target.value)}
-                    />
-                  ))}
+                  {/* Date */}
+                  <input
+                    className="overlay-input"
+                    style={{
+                      top: rowTop,
+                      left: colLefts.date,
+                      width: colWidths.date,
+                    }}
+                    type="date"
+                    value={row.date}
+                    onChange={e => handleChange(day, "date", e.target.value)}
+                  />
+                  {/* Arrived */}
+                  <input
+                    className="overlay-input"
+                    style={{
+                      top: rowTop,
+                      left: colLefts.start,
+                      width: colWidths.start,
+                    }}
+                    type="time"
+                    value={row.start}
+                    onChange={e => handleChange(day, "start", e.target.value)}
+                  />
+                  {/* Lunch (minutes) */}
+                  <input
+                    className="overlay-input"
+                    style={{
+                      top: rowTop,
+                      left: colLefts.lunch,
+                      width: colWidths.lunch,
+                    }}
+                    type="number"
+                    min="0"
+                    placeholder="min"
+                    value={row.lunch}
+                    onChange={e => handleChange(day, "lunch", e.target.value)}
+                  />
+                  {/* Finished */}
+                  <input
+                    className="overlay-input"
+                    style={{
+                      top: rowTop,
+                      left: colLefts.finish,
+                      width: colWidths.finish,
+                    }}
+                    type="time"
+                    value={row.finish}
+                    onChange={e => handleChange(day, "finish", e.target.value)}
+                  />
+                  {/* Total (free text, user can type 8h, 7.5h, etc.) */}
+                  <input
+                    className="overlay-input"
+                    style={{
+                      top: rowTop,
+                      left: colLefts.total,
+                      width: colWidths.total,
+                    }}
+                    value={row.total}
+                    placeholder="hrs"
+                    onChange={e => handleChange(day, "total", e.target.value)}
+                  />
+                  {/* Comments */}
+                  <input
+                    className="overlay-input"
+                    style={{
+                      top: rowTop,
+                      left: colLefts.comments,
+                      width: colWidths.comments,
+                    }}
+                    value={row.comments}
+                    placeholder="Comments / address"
+                    onChange={e => handleChange(day, "comments", e.target.value)}
+                  />
                 </div>
               );
             })}
@@ -386,7 +498,6 @@
         const [pdfSize, setPdfSize] = useState({ width: 0, height: 0 });
         const [signature, setSignature] = useState(null);
 
-        // CLEAN EMPTY TABLE
         const emptyRow = { date:"", start:"", lunch:"", finish:"", total:"", comments:"" };
 
         const [tableData, setTableData] = useState({
@@ -399,6 +510,13 @@
           sunday: { ...emptyRow },
         });
 
+        const [headerData, setHeaderData] = useState({
+          employeeName: "",
+          position: "",
+          projectName: "",
+          weekStarting: "",
+        });
+
         return (
           <div className="app-root">
             <div className="editor-card">
@@ -407,11 +525,18 @@
               <div className="pdf-wrapper" id="pdf-wrapper">
                 <PdfCanvas onSize={setPdfSize} />
                 {pdfSize.width > 0 && (
-                  <TableOverlay
-                    pdfSize={pdfSize}
-                    tableData={tableData}
-                    setTableData={setTableData}
-                  />
+                  <>
+                    <TopLeftOverlay
+                      pdfSize={pdfSize}
+                      headerData={headerData}
+                      setHeaderData={setHeaderData}
+                    />
+                    <TableOverlay
+                      pdfSize={pdfSize}
+                      tableData={tableData}
+                      setTableData={setTableData}
+                    />
+                  </>
                 )}
                 <SignatureButton
                   pdfSize={pdfSize}
